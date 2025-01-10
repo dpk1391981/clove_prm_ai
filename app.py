@@ -33,10 +33,10 @@ system_message = prompt_template.format(dialect="SQLite", top_k=5)
 st.title("PRM AI Assistent")
 
 # Sidebar inputs for MySQL connection and Groq API Key
-mysql_host = st.sidebar.text_input("MySQL Host", "localhost")
-mysql_user = st.sidebar.text_input("MySQL User", "genai")
-mysql_password = st.sidebar.text_input("MySQL Password", value="genai", type="password")
-mysql_db = st.sidebar.text_input("MySQL DB", value="offer_prm_uat" "")
+mysql_host = st.sidebar.text_input("MySQL Host", "")
+mysql_user = st.sidebar.text_input("MySQL User", "")
+mysql_password = st.sidebar.text_input("MySQL Password",  type="password")
+mysql_db = st.sidebar.text_input("MySQL DB", value="")
 api_key = st.sidebar.text_input("Enter Open API Key", type="password")
 # api_key = "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"
 # Query limit setting
@@ -52,7 +52,7 @@ query_limit = st.sidebar.number_input(
 if not mysql_db:
     st.info("Enter MySQL Database name.")
 if not api_key:
-    st.info("Enter Groq API Key.")
+    st.info("Enter Open API Key.")
     
 llm=None
 if api_key:
