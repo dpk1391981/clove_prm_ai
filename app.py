@@ -12,7 +12,7 @@ from langchain.embeddings import HuggingFaceEmbeddings
 from langchain.vectorstores import FAISS
 from langchain.chains.sql_database.prompt import PROMPT_SUFFIX, _mysql_prompt
 from langchain.chains import create_sql_query_chain
-import chromadb
+# import chromadb
 from langchain import hub
 from langchain_openai import ChatOpenAI
 
@@ -28,7 +28,7 @@ os.environ["LANGCHAIN_TRACING_V2"] = "true"
 
 prompt_template = hub.pull("langchain-ai/sql-agent-system-prompt")
 system_message = prompt_template.format(dialect="SQLite", top_k=5)
-chromadb.api.client.SharedSystemClient.clear_system_cache()
+# chromadb.api.client.SharedSystemClient.clear_system_cache()
 
 # Streamlit setup
 st.title("PRM AI Assistent")
