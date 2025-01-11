@@ -17,31 +17,31 @@ from agents.rag_agent import retrieve
 from agents.wikipedia import wiki_search
 from pprint import pprint
 
-from dotenv import load_dotenv
-import os
+# from dotenv import load_dotenv
+# import os
 
-## Load environment variables
-load_dotenv()
-ASTRA_DB_APPLICATION_TOKEN = os.getenv("ASTRA_DB_APPLICATION_TOKEN")
-ASTRA_DB_ID_MULTI_AGENT = os.getenv("ASTRA_DB_ID_MULTI_AGENT")
-LANGCHAIN_API_KEY = os.getenv("LANGCHAIN_API_KEY")
-MYSQL_HOST = os.getenv("MYSQL_HOST")
-MYSQL_USER = os.getenv("MYSQL_USER")
-MYSQL_PASS = os.getenv("MYSQL_PASS")
-MYSQL_DB = os.getenv("MYSQL_DB")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+# ## Load environment variables
+# load_dotenv()
+# ASTRA_DB_APPLICATION_TOKEN = os.getenv("ASTRA_DB_APPLICATION_TOKEN")
+# ASTRA_DB_ID_MULTI_AGENT = os.getenv("ASTRA_DB_ID_MULTI_AGENT")
+# LANGCHAIN_API_KEY = os.getenv("LANGCHAIN_API_KEY")
+# MYSQL_HOST = os.getenv("MYSQL_HOST")
+# MYSQL_USER = os.getenv("MYSQL_USER")
+# MYSQL_PASS = os.getenv("MYSQL_PASS")
+# MYSQL_DB = os.getenv("MYSQL_DB")
+# OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 
-# ASTRA_DB_APPLICATION_TOKEN =   st.secrets["ASTRA_DB_APPLICATION_TOKEN"]
-# ASTRA_DB_ID_MULTI_AGENT =  st.secrets["ASTRA_DB_ID_MULTI_AGENT"]
-# LANGCHAIN_API_KEY =  st.secrets["LANGCHAIN_API_KEY"]
-# MYSQL_HOST =  st.secrets["MYSQL_HOST"]
-# MYSQL_USER =  st.secrets["MYSQL_USER"]
-# MYSQL_PASS =  st.secrets["MYSQL_PASS"]
-# MYSQL_DB =  st.secrets["MYSQL_DB"]
-# OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
-# GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
+ASTRA_DB_APPLICATION_TOKEN =   st.secrets["ASTRA_DB_APPLICATION_TOKEN"]
+ASTRA_DB_ID_MULTI_AGENT =  st.secrets["ASTRA_DB_ID_MULTI_AGENT"]
+LANGCHAIN_API_KEY =  st.secrets["LANGCHAIN_API_KEY"]
+MYSQL_HOST =  st.secrets["MYSQL_HOST"]
+MYSQL_USER =  st.secrets["MYSQL_USER"]
+MYSQL_PASS =  st.secrets["MYSQL_PASS"]
+MYSQL_DB =  st.secrets["MYSQL_DB"]
+OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
+GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
 
 
 # Initialize Cassandra/AstraDB
@@ -75,7 +75,7 @@ class GraphState(TypedDict):
     session_id: Any
     
 # LLM Setup
-api_key = "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"
+api_key = OPENAI_API_KEY
 
 model = 'gpt-3.5-turbo'
 llm = ChatOpenAI(api_key=api_key, model=model, temperature=0)
