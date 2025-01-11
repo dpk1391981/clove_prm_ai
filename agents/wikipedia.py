@@ -23,6 +23,6 @@ def wiki_search(state):
 
     # Wiki search
     docs = wiki_tool.invoke({"query": question})
-    # wiki_results = Document(page_content=docs)
+    wiki_results = Document(page_content=docs)
 
-    return {"documents": docs, "question": question}
+    return {"documents": wiki_results, "question": question}

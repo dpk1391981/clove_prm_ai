@@ -1,29 +1,34 @@
-import gradio as gr
-# from langchain.callbacks import GradioCallbackHandler
-from langchain_groq import ChatGroq
 import cassio
-from langchain import hub
+import gradio as gr
+from langchain_groq import ChatGroq
+from langchain.callbacks import StreamlitCallbackHandler
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.pydantic_v1 import BaseModel, Field
-from typing import List, Literal
+from typing import List, Literal, Any
 from typing_extensions import TypedDict
 from langgraph.graph import StateGraph, START, END
-from agents.rag_agent import retrieve
 from agents.sql_agent import sql_agent
 from agents.wikipedia import wiki_search
+from agents.rag_agent import retrieve
+from langchain_openai import ChatOpenAI
+from langchain_community.document_loaders import PyPDFLoader
+
+# Environment Variables (can be loaded with a configuration file)
 from dotenv import load_dotenv
 import os
-from pprint import pprint
 
-# Load environment variables
+## Load environment variables
 load_dotenv()
-ASTRA_DB_APPLICATION_TOKEN =  os.getenv("ASTRA_DB_APPLICATION_TOKEN")
+ASTRA_DB_APPLICATION_TOKEN = os.getenv("ASTRA_DB_APPLICATION_TOKEN")
 ASTRA_DB_ID_MULTI_AGENT = os.getenv("ASTRA_DB_ID_MULTI_AGENT")
 LANGCHAIN_API_KEY = os.getenv("LANGCHAIN_API_KEY")
 MYSQL_HOST = os.getenv("MYSQL_HOST")
 MYSQL_USER = os.getenv("MYSQL_USER")
 MYSQL_PASS = os.getenv("MYSQL_PASS")
 MYSQL_DB = os.getenv("MYSQL_DB")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
 
 # Initialize Cassandra/AstraDB
 cassio.init(token=ASTRA_DB_APPLICATION_TOKEN, database_id=ASTRA_DB_ID_MULTI_AGENT)
@@ -38,102 +43,81 @@ class RoueQuery(BaseModel):
 
 class GraphState(TypedDict):
     question: str
-    llm: ChatGroq
+    llm: Any
     dbconfig: dict
     generation: str
+    callbacks: Any
     documents: List[str]
-    
-    
+    pdf_documents: Any
+
 # LLM Setup
-api_key = "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"
-llm = ChatGroq(groq_api_key=api_key, model="llama3-8b-8192", streaming=True)
-    
-# Prompt Setup
-system = """
-You are an expert at routing a user question to a vectorstore or Wikipedia. 
-The vectorstore contains documents related to agents, prompt engineering, and adversarial attacks. 
-Use the vectorstore for questions on these topics. Otherwise, use Wikipedia.
-"""
-route_prompt = ChatPromptTemplate.from_messages([
-    ("system", system),
-    ("human", "{question}"),
-])
-question_routes = route_prompt | llm.with_structured_output(RoueQuery)
+api_key = OPENAI_API_KEY
+model = 'gpt-3.5-turbo'
+llm = ChatOpenAI(api_key=api_key, model=model, temperature=0)
 
-# Function to route the question
-def route_question(state):
-    print("---ROUTE QUESTION---")
-    print(state)
-    # question = state["question"]
-    # source = question_routes.invoke({"question": question})
-    return "sql_agent"
-    # if source.datasource == "wiki_search":
-    #     print("---ROUTE QUESTION TO Wiki SEARCH---")
-    #     return "wiki_search"
-    # elif source.datasource == "vectorstore":
-    #     print("---ROUTE QUESTION TO RAG---")
-    #     return "vectorstore"
-    # elif source.datasource == "sql_agent":
-    #     return "sql_agent"
-
-
-
-# Workflow setup
-workflow = StateGraph(GraphState)
-workflow.add_node("sql_agent", sql_agent)
-# workflow.add_node("retrieve", retrieve)
-# workflow.add_node("wiki_search", wiki_search)
-
-workflow.add_conditional_edges(
-    START,
-    route_question,
-    {
-        "sql_agent": "sql_agent",
-        # "vectorstore": "retrieve",
-        # "wiki_search": "wiki_search",
-    },
-)
-workflow.add_edge("sql_agent", END)
-# workflow.add_edge("retrieve", END)
-# workflow.add_edge("wiki_search", END)
-app = workflow.compile()
-
-# Gradio Interface
-def chat_with_ai(question):
+# Gradio Interface Setup
+def chat_with_ai(question, agents, api_key_type, query_limit, upload_files):
     try:
-        inputs = {"question": question, "llm": llm, "dbconfig": {
-            "host": MYSQL_HOST,
-            "user": MYSQL_USER,
-            "pass": MYSQL_PASS,
-            "db_name": MYSQL_DB,
-            "limit": 100
-        }}
-        response = []
-        
-        for output in app.stream(inputs):
-            for key, value in output.items():
-                response.append(value)
-        
-        # Display the last result
-        if response:
-            documents = response[-1]
-            return documents["documents"].page_content
+        pdf_documents = []
+        if agents == 'RAG-PDFs' and upload_files:
+            for uploaded_file in upload_files:
+                tempdf = f"./tmp.pdf"
+                with open(tempdf, "wb") as file:
+                    file.write(uploaded_file.getvalue())
+                    file_name = uploaded_file.name
+
+                loader = PyPDFLoader(tempdf)
+                docs = loader.load()
+                pdf_documents.extend(docs)
+
+        # Set model and query agent
+        if api_key_type == "Groq API":
+            api_key = GROQ_API_KEY
+            model = 'llama-3.3-70b-versatile'
+            llm = ChatGroq(groq_api_key=api_key, model=model, streaming=True)
+
+        # Routing logic based on agent selection
+        if agents == 'RAG-PDFs':
+            return "Routing to vectorstore"
+        elif agents == "Wikipedia":
+            return "Routing to Wikipedia"
         else:
-            return "No response received from the workflow."
-    except ValueError as e:
-        return f"Parsing Error: {e}"
+            return "Routing to SQL Agent"
+
     except Exception as e:
         return f"Error: {e}"
 
-# Gradio UI
-with gr.Blocks(theme=gr.themes.Default(primary_hue=gr.themes.colors.red, secondary_hue=gr.themes.colors.pink)) as demo:
-    gr.Markdown("## PRM AI Assistant")
-    with gr.Row():
-        input_box = gr.Textbox(label="Ask your question", placeholder="Type your question here...")
-        output_box = gr.Textbox(label="Response")
-    
-    submit_button = gr.Button("Submit")
-    submit_button.click(chat_with_ai, inputs=[input_box], outputs=[output_box])
+# Gradio interface layout
+def create_gradio_interface():
+    with gr.Blocks() as demo:
+        gr.Markdown("## PRM AI Assistant")
+        gr.Markdown("Type your question below and get answers from the relevant datasource!")
 
-# Launch the Gradio App
+        # Select the LLM type
+        api_key_type = gr.Radio(choices=["Open API", "Groq API"], label="Choose LLM Type")
+        
+        # Select the agent type
+        agents = gr.Radio(choices=["SQL", "RAG-PDFs", "Wikipedia"], label="Select Agent")
+        
+        # File upload for PDFs (for RAG-PDFs)
+        upload_files = gr.File(label="Upload PDFs", file_count="multiple", type="file")
+
+        # Textbox for user input
+        user_input = gr.Textbox(label="Ask your question")
+
+        # Output response
+        response_output = gr.Textbox(label="Response", interactive=False)
+
+        # Process button to get the response
+        def process_input(user_input, agents, api_key_type, query_limit, upload_files):
+            response = chat_with_ai(user_input, agents, api_key_type, query_limit, upload_files)
+            return response
+
+        submit_btn = gr.Button("Submit")
+        submit_btn.click(process_input, inputs=[user_input, agents, api_key_type, gr.Number(default=100), upload_files], outputs=response_output)
+
+    return demo
+
+# Launch the Gradio interface
+demo = create_gradio_interface()
 demo.launch()
