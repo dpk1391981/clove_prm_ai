@@ -1,149 +1,164 @@
+import cassio
 import streamlit as st
-from langchain.agents import initialize_agent
-from langchain.sql_database import SQLDatabase
-from langchain.agents.agent_types import AgentType
-from langchain.callbacks import StreamlitCallbackHandler
-from langchain.agents.agent_toolkits import SQLDatabaseToolkit
-from sqlalchemy import create_engine
 from langchain_groq import ChatGroq
-from langchain.prompts import SemanticSimilarityExampleSelector,PromptTemplate,FewShotPromptTemplate
-from few_shots import few_shots
-from langchain.embeddings import HuggingFaceEmbeddings
-from langchain.vectorstores import FAISS
-from langchain.chains.sql_database.prompt import PROMPT_SUFFIX, _mysql_prompt
-from langchain.chains import create_sql_query_chain
-# import chromadb
-from langchain import hub
+from langchain.callbacks import StreamlitCallbackHandler
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.pydantic_v1 import BaseModel, Field
+from typing import List, Literal, Any
+from typing_extensions import TypedDict
+from langgraph.graph import StateGraph, START, END
+from agents.sql_agent import sql_agent
 from langchain_openai import ChatOpenAI
 
-import os
+# from agents.rag_agent import retrieve
+# from langchain import hub
+# from agents.wikipedia import wiki_search
+
 # from dotenv import load_dotenv
-# load_dotenv() 
+# import os
 
-os.environ["LANGCHAIN_API_KEY"] = st.secrets['LANGCHAIN_API_KEY']
-os.environ["LANGCHAIN_PROJECT"] = "PRMAIAssistentLogs"
-os.environ["LANGCHAIN_TRACING_V2"] = "true"
+# ## Load environment variables
+# load_dotenv()
+# ASTRA_DB_APPLICATION_TOKEN = os.getenv("ASTRA_DB_APPLICATION_TOKEN")
+# ASTRA_DB_ID_MULTI_AGENT = os.getenv("ASTRA_DB_ID_MULTI_AGENT")
+# LANGCHAIN_API_KEY = os.getenv("LANGCHAIN_API_KEY")
+# MYSQL_HOST = os.getenv("MYSQL_HOST")
+# MYSQL_USER = os.getenv("MYSQL_USER")
+# MYSQL_PASS = os.getenv("MYSQL_PASS")
+# MYSQL_DB = os.getenv("MYSQL_DB")
+# OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 
-prompt_template = hub.pull("langchain-ai/sql-agent-system-prompt")
-system_message = prompt_template.format(dialect="SQLite", top_k=5)
-# chromadb.api.client.SharedSystemClient.clear_system_cache()
+ASTRA_DB_APPLICATION_TOKEN =   st.secrets["ASTRA_DB_APPLICATION_TOKEN"]
+ASTRA_DB_ID_MULTI_AGENT =  st.secrets["ASTRA_DB_ID_MULTI_AGENT"]
+LANGCHAIN_API_KEY =  st.secrets["LANGCHAIN_API_KEY"]
+MYSQL_HOST =  st.secrets["MYSQL_HOST"]
+MYSQL_USER =  st.secrets["MYSQL_USER"]
+MYSQL_PASS =  st.secrets["MYSQL_PASS"]
+MYSQL_DB =  st.secrets["MYSQL_DB"]
+OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
+GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
 
-# Streamlit setup
-st.title("PRM AI Assistent")
 
-# Sidebar inputs for MySQL connection and Groq API Key
-mysql_host = st.sidebar.text_input("MySQL Host", "")
-mysql_user = st.sidebar.text_input("MySQL User", "")
-mysql_password = st.sidebar.text_input("MySQL Password",  type="password")
-mysql_db = st.sidebar.text_input("MySQL DB", value="")
-api_key = st.sidebar.text_input("Enter Open API Key", type="password")
-# api_key = "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"
-# Query limit setting
+# Initialize Cassandra/AstraDB
+cassio.init(token=ASTRA_DB_APPLICATION_TOKEN, database_id=ASTRA_DB_ID_MULTI_AGENT)
+
+# Data Model
+class RoueQuery(BaseModel):
+    """Route a user query to the most relevant datasource."""
+    datasource: Literal["vectorstore", "wiki_search", "sql_agent"] = Field(
+        ...,
+        description="Choose to route it to Wikipedia, vectorstore, or a SQL agent.",
+    )
+
+class GraphState(TypedDict):
+    question: str
+    llm: Any
+    dbconfig: dict
+    generation: str
+    callbacks: Any
+    documents: List[str]
+    
+# LLM Setup
+api_key = OPENAI_API_KEY
+
+model = 'gpt-3.5-turbo'
+llm = ChatOpenAI(api_key=api_key, model=model, temperature=0)
+
+# Input box for user question
+api_key_type = st.sidebar.selectbox(
+    "Choose LLM Type",
+    ("Open API", "Groq API"),
+)
+
+if api_key_type == "Groq API":
+    api_key = GROQ_API_KEY
+    model = 'llama-3.3-70b-versatile'
+    llm = ChatGroq(groq_api_key=api_key, model="llama-3.3-70b-versatile", streaming=True)
+   
+
 query_limit = st.sidebar.number_input(
     "Set maximum number of rows to fetch per query:",
     min_value=1,
-    max_value=1000,
+    max_value=1000000,
     value=100,
     step=1,
 )
 
-# Validate required fields
-if not mysql_db:
-    st.info("Enter MySQL Database name.")
-if not api_key:
-    st.info("Enter Open API Key.")
-    
-llm=None
-if api_key:
-    # llm = ChatGroq(groq_api_key=api_key, model="llama3-8b-8192", streaming=True)
-    llm = ChatOpenAI(api_key=api_key, model="gpt-3.5-turbo", temperature=0)
+# Display the selected option
+st.markdown(f"Default LLM API : **{api_key_type}** and Default Model: **{model}**")
 
-@st.cache_resource(ttl="2h")
-def config_mysql_db(mysql_host, mysql_user, mysql_password, mysql_db):
-    """Configure MySQL Database connection."""
-    if not (mysql_db and mysql_host and mysql_user and mysql_password):
-        st.error("Please provide complete MySQL DB configuration.")
-        st.stop()
-    db_engine = create_engine(f"mysql+mysqlconnector://{mysql_user}:{mysql_password}@{mysql_host}/{mysql_db}")
-    db = SQLDatabase(db_engine)
-    
-    # Restrict tables to a specific subset
-    # db._inspector.get_table_names = lambda: ["facility" ]
-    return db
+# Prompt Setup
+system = """
+You are an expert at routing a user question to a vectorstore or Wikipedia. 
+The vectorstore contains documents related to agents, prompt engineering, and adversarial attacks. 
+Use the vectorstore for questions on these topics. Otherwise, use Wikipedia.
+"""
+route_prompt = ChatPromptTemplate.from_messages([
+    ("system", system),
+    ("human", "{question}"),
+])
+question_routes = route_prompt | llm.with_structured_output(RoueQuery)
 
-# Configure the database
-db = config_mysql_db(mysql_host, mysql_user, mysql_password, mysql_db)
+# Function to route the question
+def route_question(state):
+    print("---ROUTE QUESTION---")
+    print(state)
+    # question = state["question"]
+    # source = question_routes.invoke({"question": question})
+    return "sql_agent"
 
-# Toolkit setup
-toolkit = SQLDatabaseToolkit(llm=llm, db=db)
+# Workflow setup
+workflow = StateGraph(GraphState)
+workflow.add_node("sql_agent", sql_agent)
 
-embeddings = HuggingFaceEmbeddings(model_name='sentence-transformers/all-MiniLM-L6-v2')
-to_vectorize = [" ".join(example.values()) for example in few_shots]
-vectorstore = FAISS.from_texts(to_vectorize, embedding=embeddings, metadatas=few_shots)
-# example_selector = SemanticSimilarityExampleSelector(
-#     vectorstore=vectorstore,
-#     k=2,
-# )
-
-example_selector = SemanticSimilarityExampleSelector.from_examples(
-    examples=few_shots,
-    embeddings=embeddings,
-    vectorstore_cls=FAISS,
-    k=2
+workflow.add_conditional_edges(
+    START,
+    route_question,
+    {
+        "sql_agent": "sql_agent",
+    },
 )
+workflow.add_edge("sql_agent", END)
+app = workflow.compile()
 
-# print(example_selector);
+# Streamlit Interface
+def chat_with_ai(question):
+    try:
+        inputs = {
+            "question": question,
+            "llm": llm,
+            "dbconfig": {
+                "host": MYSQL_HOST,
+                "user": MYSQL_USER,
+                "pass": MYSQL_PASS,
+                "db_name": MYSQL_DB,
+                "limit": query_limit,
+            },
+            "callbacks": StreamlitCallbackHandler(st.container())
+        }
+        response = []
+        
+        for output in app.stream(inputs):
+            for key, value in output.items():
+                response.append(value)
+        
+        # Display the last result
+        if response:
+            documents = response[-1]
+            return documents["documents"].page_content
+        else:
+            return "No response received from the workflow."
+    except ValueError as e:
+        return f"Parsing Error: {e}"
+    except Exception as e:
+        return f"Error: {e}"
 
-
-mysql_prompt = """You are a MySQL expert. Given an input question, first create a syntactically correct MySQL query to run, then look at the results of the query and return the answer to the input question.
-    Unless the user specifies in the question a specific number of examples to obtain, query for at most {top_k} results using the LIMIT clause as per MySQL. You can order the results to return the most informative data in the database.
-    Never query for all columns from a table. You must query only the columns that are needed to answer the question. Wrap each column name in backticks (`) to denote them as delimited identifiers.
-    Pay attention to use only the column names you can see in the tables below. Be careful to not query for columns that do not exist. Also, pay attention to which column is in which table.
-    Pay attention to use CURDATE() function to get the current date, if the question involves "today".
+# Streamlit App Layout
+st.title("PRM AI Assistant")
+st.markdown("Type your question below and get answers from the relevant datasource!")
     
-    Use the following format:
-    
-    Question: Question here
-    SQLQuery: Query to run with no pre-amble
-    SQLResult: Result of the SQLQuery
-    Answer: Final answer here
-    
-    If the question is about **clinics**, return **ALL** these tables:
-    - "facility"
-    - "users"
-    
-    ### Category Mappings:
-    1. **Category: receipts**
-    - Table: receipt
-  
-    No pre-amble.
-    """
-
-example_prompt = PromptTemplate(
-    input_variables=["Question", "SQLQuery", "SQLResult","Answer",],
-    template="\nQuestion: {Question}\nSQLQuery: {SQLQuery}\nSQLResult: {SQLResult}\nAnswer: {Answer}",
-)
-
-few_shot_prompt = FewShotPromptTemplate(
-        example_selector=example_selector,
-        example_prompt=example_prompt,
-        prefix=mysql_prompt,
-        suffix=PROMPT_SUFFIX,
-        input_variables=["input", "table_info", "top_k"], #These variables are used in the prefix and suffix
-    )
-
-
-# Initialize the agent with few-shot prompting
-agent = initialize_agent(
-    tools=toolkit.get_tools(),
-    llm=llm,
-    agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
-    verbose=True,
-    handle_parsing_errors=True,  # Enable parsing error handling
-    prompt=few_shot_prompt,  # Use the FewShotPromptTemplate
-)
-
 # Chat history initialization
 if "messages" not in st.session_state or st.sidebar.button("Clear History"):
     st.session_state["messages"] = [{"role": "assistant", "content": "How can I help you?"}]
@@ -151,28 +166,20 @@ if "messages" not in st.session_state or st.sidebar.button("Clear History"):
 # Display chat history
 for msg in st.session_state.messages:
     st.chat_message(msg["role"]).write(msg["content"])
-
+    
 # Handle user input
 user_input = st.chat_input("Ask from your local database!")
-
+    
 if user_input:
     st.session_state.messages.append({"role": "user", "content": user_input})
     st.chat_message("user").write(user_input)
-
-    with st.chat_message("assistant"): #st.spinner("Generating response")
-        try:
-            # Add LIMIT clause to user input
-            limited_query = f"{user_input} LIMIT {query_limit}"
-            streamlit_callback = StreamlitCallbackHandler(st.container())
-            response = agent.run(limited_query, callbacks=[streamlit_callback])
-            # response = agent.run(limited_query)
-            response = response[:500]
-
-
-            # Save assistant response to history
-            st.session_state.messages.append({"role": "assistant", "content": response})
-            st.write(response)
-        except ValueError as e:
-            st.error(f"Parsing Error: {e}")
-        except Exception as e:
-            st.error(f"Error: {e}")
+    
+    with st.chat_message("assistant"):
+        # streamlit_callback = StreamlitCallbackHandler(st.container())
+        response = chat_with_ai(user_input)
+        if response:
+            st.success("Done!")
+            st.markdown(f"**Response:** {response}")
+        else:
+            st.error("Error!")
+            # st.markdown(f"**Response:** {response}")
