@@ -75,28 +75,28 @@ class GraphState(TypedDict):
     session_id: Any
     
 # LLM Setup
-api_key = OPENAI_API_KEY
-
-model = 'gpt-3.5-turbo'
-llm = ChatOpenAI(api_key=api_key, model=model, temperature=0)
+api_key = GROQ_API_KEY
+model = 'llama-3.3-70b-versatile'
+llm = ChatGroq(groq_api_key=api_key, model="llama-3.3-70b-versatile", streaming=True)
 
 # Input box for user question
 api_key_type = st.sidebar.selectbox(
-    "Choose LLM Type",
-    ("Open API", "Groq API"),
+    "Select LLM API",
+    ("Groq API","Open API"),
 )
 
 query_limit = 0
 # Input box for user question
 agents = st.sidebar.selectbox(
     "Select Agent",
-    ("SQL", "RAG-PDFs", "Wikipedia" ),
+    ("RAG-PDFs", "SQL",  "Wikipedia" ),
 )
 session_id=st.sidebar.text_input("Session ID", value="default_session")
-if api_key_type == "Groq API":
-    api_key = GROQ_API_KEY
-    model = 'llama-3.3-70b-versatile'
-    llm = ChatGroq(groq_api_key=api_key, model="llama-3.3-70b-versatile", streaming=True)
+
+if api_key_type == "Open API":
+    api_key = OPENAI_API_KEY
+    model = 'gpt-3.5-turbo'
+    llm = ChatOpenAI(api_key=api_key, model=model, temperature=0)
    
 if agents == 'SQL':
     query_limit = st.sidebar.number_input(
@@ -235,7 +235,7 @@ for msg in st.session_state.messages:
     st.chat_message(msg["role"]).write(msg["content"])
     
 # Handle user input
-user_input = st.chat_input("Ask from your local database!")
+user_input = st.chat_input("Ask to AI agent!")
     
 withType = st.chat_message("assistant")
 if agents == "RAG-PDFs" or agents == "Wikipedia":
